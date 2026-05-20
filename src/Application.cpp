@@ -4,6 +4,8 @@
 #include <thread>
 #include <chrono>
 
+DltContext main_dltCxt; // define context
+
 void Application::init()
 {
     TCPCommunicator::get_instance()->start();
@@ -27,8 +29,6 @@ void Application::receive_from_server()
     }
     DEBUG_LOG("not element in queue any more");
 }
-
-DLT_DEFINE_CONTEXT(main_dltCxt); // define context
 
 int main() {
     DLT_REGISTER_APP("TCPC", "TCP Client Application"); // register app with DLT Daemon

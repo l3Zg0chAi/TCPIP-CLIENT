@@ -30,7 +30,8 @@ inline void setCurrentThreadName(const std::string& name){
 #define DLT_DEBUG_LOG
 #ifdef DLT_DEBUG_LOG
 #include <dlt/dlt.h>
-DLT_DECLARE_CONTEXT(main_dltCxt); // same as extern
+
+extern DltContext main_dltCxt;
 #define DEBUG_LOG(fmt, ...)                                                   \
     do {                                                                      \
         char logBuffer[1024];                                                 \
