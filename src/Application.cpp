@@ -31,12 +31,9 @@ void Application::receive_from_server()
 }
 
 int main() {
-    std::cout << "before DLT_REGISTER_APP and context\n";
     DLT_REGISTER_APP("TCPC", "TCP Client Application"); // register app with DLT Daemon
     DLT_REGISTER_CONTEXT(main_dltCxt, "MAIN", "Main application context"); // register context of app with DLT Daemon
 
-    std::cout << "register complete\n";
-    DLT_LOG(main_dltCxt, DLT_LOG_ERROR, DLT_CSTRING("DLT smoke test TCPC MAIN"));
     Application::get_instance()->init();
     Application::get_instance()->execute();
 
