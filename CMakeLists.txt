@@ -8,4 +8,4 @@ set(SOURCES
     src/TCPCommunicator.cpp
 )
 add_executable(tcpclient ${SOURCES})
-target_link_libraries(tcpclient -pthread)
+target_link_libraries(tcpclient -pthread dlt)

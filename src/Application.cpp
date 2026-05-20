@@ -28,8 +28,14 @@ void Application::receive_from_server()
     DEBUG_LOG("not element in queue any more");
 }
 
+DLT_DEFINE_CONTEXT(main_dltCxt); // define context
+
 int main() {
+    DLT_REGISTER_APP("TCPC", "TCP Client Application"); // register app with DLT Daemon
+    DLT_REGISTER_CONTEXT(main_dltCxt, "MAIN", "Main application context"); // register context of app with DLT Daemon
     Application::get_instance()->init();
     Application::get_instance()->execute();
+
+    DLT_UNREGISTER_CONTEXT(main_dltCxt); // unregister context
     return 0;
 }
