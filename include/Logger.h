@@ -42,7 +42,7 @@ extern DltContext main_dltCxt;
             __FILE__, __LINE__, __func__, ##__VA_ARGS__);                     \
                                                                               \
         std::fprintf(stderr, "%s\n", logBuffer);                              \
-        DLT_LOG(main_dltCxt, DLT_LOG_DEBUG, DLT_CSTRING(logBuffer));          \
+        DLT_LOG(main_dltCxt, DLT_LOG_INFO, DLT_CSTRING(logBuffer));          \
     } while (0)
     /* write the log to dlt level debug, belongs to main_dltCxt context */
 #else
