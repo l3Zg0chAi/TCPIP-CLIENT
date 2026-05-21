@@ -44,7 +44,7 @@ extern DltContext main_dltCxt;
         std::fprintf(stderr, "%s\n", logBuffer);                              \
         DLT_LOG(main_dltCxt, DLT_LOG_INFO, DLT_CSTRING(logBuffer));          \
     } while (0)
-    /* write the log to dlt level debug, belongs to main_dltCxt context */
+    /* write the log to dlt level info, belongs to main_dltCxt context */
 #else
 #define DEBUG_LOG(fmt, ...) \
     do { \

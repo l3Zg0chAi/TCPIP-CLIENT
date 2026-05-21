@@ -31,7 +31,7 @@ void Application::receive_from_server()
 }
 
 int main() {
-    DLT_REGISTER_APP("TCPC", "TCP Client Application"); // register app with DLT Daemon
+    DLT_REGISTER_APP("CTCP", "TCPClient Application"); // register app with DLT Daemon
     DLT_REGISTER_CONTEXT(main_dltCxt, "MAIN", "Main application context"); // register context of app with DLT Daemon
 
     Application::get_instance()->init();
