@@ -2,6 +2,8 @@ MỤC LỤC
 1. 4 trường thông tin Seq Ack Win Len (trong wireshark)
 2. ICMP PING ECHO REQUEST/ECHO REPLY và TOKEN BUCKET
 3. sự khác nhau TCP và UDP
+4. SOL_SOCKET options
+5. HOW TO CACULATED RETRANSMISSION
 
 ***                                                       ***
 *** 4 trường thông tin Seq Ack Win Len (trong wireshark)  ***
@@ -216,3 +218,150 @@ sendto() ghi vào ────►  [ SEND BUFFER ]  ────►  truyền đ
                    ✗ KHÔNG có ACK gửi về 
                    ✗ KHÔNG có đường phản hồi 
                    ✗ Bên gửi KHÔNG bao giờ biết kết quả
+				   
+
+***                     ***
+*** SOL_SOCKET options  ***
+***                     ***
+
+SOL_SOCKET is the socket layer itself. It is used for options that are protocol independent.                   
+SOL_SOCKET là tầng socket layer — tức là cấp độ của chính socket, không phải TCP/IP hay protocol nào cụ thể.                   
+
+
+Hàm setsockopt() có 3 tầng level:                   
+SOL_SOCKET    Tầng socket chung, độc lập với protocol        SO_REUSEADDR, SO_KEEPALIVE, SO_SNDBUF       
+IPPROTO_TCP    Tầng TCP cụ thể                               TCP_NODELAY, TCP_KEEPIDLE       
+IPPROTO_IP    Tầng IP cụ thể                                 IP_TTL, IP_MULTICAST_TTL       
+
+SO_REUSEADDR:                    
+  Bind lại socket vào cùng một địa chỉ/port ngay sau khi socket trước đó bị đóng, mà không phải chờ trạng thái TIME_WAIT (thường là 2 phút) của TCP hết hạn.                 
+
+
+SO_KEEPALIVE                   
+  Khi kết nối TCP không có data truyền trong một thời gian dài, kernel sẽ tự động gửi các probe packet nhỏ để kiểm tra xem peer còn sống hay không.                 
+  Client TCP của meter connect tới ICB server. Nếu ICB bị crash/mất mạng đột ngột mà không gửi FIN/RST, socket phía client sẽ không biết — SO_KEEPALIVE giúp tự động detect kết nối đã chết để trigger reconnect.                 
+
+SO_PRIORITY                   
+  là socket option để set độ ưu tiên (QoS priority) của các packet gửi đi ở tầng Linux network stack.                 
+  3 là mức default                 
+TCP_NODELAY                   
+  option này tắt Nagle's Algorithm của TCP                 
+  Nagle's Algorithm là gì? Mặc định TCP sẽ gom nhỏ nhiều packet lại rồi gửi 1 lần để tiết kiệm bandwidth:                 
+
+  Không có TCP_NODELAY (Nagle ON):                 
+   app send 10 bytes → chờ... gom thêm data → gửi 1 packet lớn hơn                 
+   → latency cao hơn                 
+
+  Có TCP_NODELAY (Nagle OFF):                 
+   app send 10 bytes → gửi ngay lập tức                 
+   → latency thấp     
+
+***                                   ***
+*** HOW TO CACULATED RETRANSMISSION   ***
+***                                   ***   
+
+/** 
+*  retransmits_timed_out() - returns true if this connection has timed out 
+*  @sk:       The current socket 
+*  @boundary: max number of retransmissions 
+*  @timeout:  A custom timeout value. 
+*             If set to 0 the default timeout is calculated and used. 
+*             Using TCP_RTO_MIN and the number of unsuccessful retransmits. 
+* 
+* The default "timeout" value this function can calculate and use 
+* is equivalent to the timeout of a TCP Connection 
+* after "boundary" unsuccessful, exponentially backed-off 
+* retransmissions with an initial RTO of TCP_RTO_MIN. 
+*/ 
+static bool retransmits_timed_out(struct sock *sk, 
+         unsigned int boundary, 
+         unsigned int timeout) 
+{ 
+  const unsigned int rto_base = TCP_RTO_MIN; 
+  unsigned int linear_backoff_thresh, start_ts; 
+
+  if (!inet_csk(sk)->icsk_retransmits) 
+    return false; 
+
+  start_ts = tcp_sk(sk)->retrans_stamp; 
+  if (unlikely(!start_ts)) 
+    start_ts = tcp_skb_timestamp(tcp_write_queue_head(sk)); 
+
+  if (likely(timeout == 0)) { 
+    linear_backoff_thresh = ilog2(TCP_RTO_MAX/rto_base); 
+
+    if (boundary <= linear_backoff_thresh) 
+      timeout = ((2 << boundary) - 1) * rto_base; 
+    else 
+      timeout = ((2 << linear_backoff_thresh) - 1) * rto_base + 
+        (boundary - linear_backoff_thresh) * TCP_RTO_MAX; 
+  } 
+  return (tcp_time_stamp(tcp_sk(sk)) - start_ts) >= jiffies_to_msecs(timeout); 
+} 
+
+
+Key: icsk_retransmits=0 bypass check 
+
+if (!inet_csk(sk)->icsk_retransmits) 
+   return false;  // ← retransmits=0 → KHÔNG BAO GIỜ timeout 
+                  //   → luôn cho phép retransmit #1 
+
+Timeline với RTO=3.2s, threshold=3s           
+t=0s    │ gốc PSH,ACK gửi        retransmits=0 
+
+t=3.2s  │ timer fire (RTO=3.2s) 
+       │ retransmits_timed_out(): 
+       │   retransmits=0 → return false  ← bypass! 
+       │ → retransmit #1 GỬI 
+       │   retransmits=1 
+       │   retrans_stamp = 3.2s  ← start_ts từ đây 
+       │   RTO doubled: 3.2×2 = 6.4s 
+
+t=9.6s  │ timer fire (3.2+6.4) 
+       │ retransmits_timed_out(): 
+       │   retransmits=1 ≠ 0 → check elapsed 
+       │   elapsed = 9.6 - 3.2 = 6.4s >= 3s → TRUE → ABORT 
+       │ → retransmit #2 KHÔNG gửi 
+
+--------------------------------------------------------------- 
+
+t=0s      │ gốc PSH,ACK gửi        retransmits=0 
+t = 200ms │ timer fire (RTO=200ms) 
+          │ retransmits_timed_out(): 
+          │   retransmits=0 → return false  ← bypass! 
+          │ → retransmit #1 GỬI 
+          │   retransmits=1 
+          │   retrans_stamp = 200ms  ← start_ts từ đây, set 1 lần thôi, mốc để tính timeout 
+          │   RTO doubled: 200×2 = 400ms 
+
+t = 600ms │ timer fire 
+          │ retransmits_timed_out(): 
+          │   retransmits=1 ≠ 0 → check elapsed 
+          │   elapsed = 600 - 200 = 400ms < 3s  → false → 
+          │ → retransmit #2 GỬI 
+          │   retransmits=2 
+       │   RTO doubled: 400×2 = 800s 
+
+t = 1400ms │ timer fire 
+           │ retransmits_timed_out(): 
+           │   retransmits=2 ≠ 0 → check elapsed 
+           │   elapsed = 1400 - 200 = 1200ms < 3s → false → 
+           │ → retransmit #3 GỬI 
+           │   retransmits=3 
+        │   RTO doubled: 800×2 = 1600ms = 1,6s 
+
+t = 3000ms │ timer fire 
+           │ retransmits_timed_out(): 
+           │   retransmits=3 ≠ 0 → check elapsed 
+           │   elapsed = 3000 - 200 = 2800ms < 3s → false → 
+           │ → retransmit #4 GỬI 
+           │   retransmits=4 
+        │   RTO doubled: 1600×2 = 3200ms = 3,2 
+
+t =6200ms  │ timer fire (RTO=200ms) 
+           │ retransmits_timed_out(): 
+           │   retransmits=4 ≠ 0 → check elapsed 
+           │   elapsed = 6200 - 200 = 6s >= 3s → TRUE →  ABORT 
+           │ → retransmit #5 không GỬI 
+
+-> 4 lần retransmission 
