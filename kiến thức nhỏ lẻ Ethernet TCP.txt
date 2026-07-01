@@ -1,0 +1,218 @@
+MỤC LỤC
+1. 4 trường thông tin Seq Ack Win Len (trong wireshark)
+2. ICMP PING ECHO REQUEST/ECHO REPLY và TOKEN BUCKET
+3. sự khác nhau TCP và UDP
+
+***                                                       ***
+*** 4 trường thông tin Seq Ack Win Len (trong wireshark)  ***
+***                                                       ***
+
+Seq (Sequence Number): byte đầu tiên trong gói này là byte thứ mấy 
+-> TCP đánh số từng byte dữ liệu. Seq = số thứ tự của byte đầu tiên trong gói này. 
+Công thức quan trọng: Seq của gói tiếp theo = Seq hiện tại + Len 
+
+Ack (Acknowledgment Number) 
+- xác nhận đã nhận đủ n-1 byte và byte cần nhận tiếp theo là byte số n 
+
+Len (Length) 
+Số byte dữ liệu thực trong gói (payload), không tính header TCP/IP. 
+Len = 0 là gói ko mang dữ liệu, nhưng bản tin SYN và FIN mang 1 byte ảo nên Seq sẽ tăng 
+
+mỗi thông tin đều độc lập 2 bên riêng biệt 
+                     A              B 
+5   0.000007075  172.29.211.9  172.29.11.3    TCP                62  53635 → 49155 [SYN] Seq=0 Win=29200 Len=0 MSS=1460 
+7   0.000630736  172.29.11.3   172.29.211.9    TCP                60  49155 → 53635 [SYN, ACK] Seq=0 Ack=1 Win=65535 Len=0 
+8   0.000833998  172.29.211.9  172.29.11.3    TCP                60  53635 → 49155 [ACK] Seq=1 Ack=1 Win=29200 Len=0 
+10  0.526033659  172.29.211.9  172.29.11.3    METER_ICB_D084_STRGSW_INT  71  53635 → 49155 [PSH, ACK] Seq=1 Ack=1 Win=29200 Len=13 
+18  0.526760957  172.29.11.3   172.29.211.9    ICB_METER_D084_APPLIEDAPP  69  49155 → 53635 [PSH, ACK] Seq=1 Ack=14 Win=65535 Len=11 
+19  0.526931344  172.29.211.9  172.29.11.3    TCP                60  53635 → 49155 [ACK] Seq=14 Ack=12 Win=29200 Len=0 
+
+172.29.211.9 là A 
+172.29.11.3  là B 
+
+frame 5: 
+A gửi bản tin SYN tới B để mở kết nối, 
+bắt đầu đếm số thứ tự từ byte số 0 với bên A do đó Seq = 0, Len = 0 là ko có data 
+
+frame 7: 
+B gửi bản tin SYN,ACK tới A  
+bắt đầu đếm số thứ tự từ byte số 0 với bên B do đó Seq = 0, 
+Ack = 1 là đã nhận được đến byte thứ 0 (ở đây nghĩa là nhận được byte 0) 
+nghĩa là đã nhận được bản tin SYN từ A rồi 
+
+frame 8: 
+A gửi bản tin ACK tới B 
+Seq = 1 là byte thứ 1, vì SYN mất 1 byte ảo ở bản tin SYN frame 5(thực chất là nó chiếm 1 số thứ tự) 
+Ack = 1 nghĩa là đã nhận được byte số 0 tức là bản tin SYN,ACK rồi, chờ byte tiếp theo từ B 
+-> connect hoàn tất 
+
+frame 10: 
+A gửi data packet METER_ICB_D084_STRGSW_INT tới B 
+vì bản tin ACK thuần ko có len (frame 8) ko tốn byte ảo, do đó Seq = 1 
+Ack = 1 chờ byte tiếp theo từ B (B mới gửi byte 0 là bản tin SYN,ACK) 
+Len = 13 là gói thực sự có 13byte dữ liệu ko tính header
+-> A gửi 13 byte dữ liệu tới B, byte đầu tiên đánh stt là 1, và cũng chờ byte tiếp theo từ B 
+
+frame 18: 
+B gửi data packet ICB_METER_D084_APPLIEDAPP tới A 
+Seq = 1, trước đó Seq = 0 
+Ack = 14 là xác nhận đã nhận đủ 14-1 = 13 byte dữ liệu từ A, (khớp với frame 10 chưa kkk), chờ dữ liệu tiếp theo ( từ byte số 14) 
+Len là dữ liệu gói ICB_METER_D084_APPLIEDAPP là 11 byte gửi tới A 
+
+frame 19: 
+A gửi bản tin ACK tới B 
+Seq = 14 vì, Seq trước đó = 1, cộng với 13byte dữ liệu thì byte tiếp theo chả là số thứ tự 14 
+Ack = 12 nghĩa là đã nhận đủ 11 byte trước đó từ B (khớp với ICB_METER_D084_APPLIEDAPP chưa kkk), chờ dữ liệu từ byte tiếp theo (từ byte số 12), 
+Len = 0 là bản tin ACK thuần ko có dữ liệu 
+
+MSS trong frame 5 và 7 (MSS=1460) là một thông số quan trọng. Giải thích: 
+
+MSS = Maximum Segment Size 
+= Số byte DỮ LIỆU tối đa mà một bên chấp nhận nhận trong một segment TCP, KHÔNG tính header TCP/IP. 
+
+→ Nói cách khác: "Mỗi gói, đừng gửi cho tôi quá MSS byte dữ liệu." 
+
+Vì sao là 1460? 
+Con số 1460 đến từ phép trừ này: 
+
+MTU Ethernet:          1500 byte   (kích thước khung tối đa) 
+− IP header:          20 byte 
+− TCP header:         20 byte 
+───────────────────────────── 
+= MSS:              1460 byte   ← chỗ còn lại cho DỮ LIỆU 
+→ 1500 − 20 − 20 = 1460. Đây là lý do MSS=1460 xuất hiện rất phổ biến (mạng Ethernet chuẩn). 
+
+"Segment" và "Flag" là gì 
+Segment = đơn vị dữ liệu của TCP (giống như "gói tin" ở tầng TCP). Mọi dòng trong log của bạn — dù là [SYN], [ACK], [PSH, ACK], [SYN, ACK] — đều là một TCP segment. 
+Flag = các bit điều khiển trong header TCP. Phần trong ngoặc [...] chỉ cho biết segment đó bật những cờ nào. 
+→ Vậy [PSH, ACK] = 1 segment TCP với cờ PSH và ACK cùng được bật. 
+
+6 cờ chính của TCP 
+Cờ   Tên   Ý nghĩa 
+SYN  Synchronize   Mở kết nối (đồng bộ Seq ban đầu) 
+ACK  Acknowledgment  Trường Ack có giá trị hợp lệ (xác nhận) 
+PSH  Push   "Đẩy dữ liệu lên ứng dụng ngay, đừng đợi đầy buffer" 
+FIN  Finish   Đóng kết nối (lịch sự) 
+RST  Reset   Đóng kết nối đột ngột (báo lỗi) 
+URG  Urgent   Có dữ liệu khẩn (ít dùng)
+
+***                                                       ***
+*** ICMP PING ECHO REQUEST/ECHO REPLY và TOKEN BUCKET     ***
+***                                                       ***
+
+172.29.211.1 (tester)                 172.29.211.9 (máy bạn) 
+         │                                       │ 
+         │   ① Echo Request (type 8)             │ 
+         │ ─────────────────────────────────────▶│  ┌─ INPUT chain ─────────────┐ 
+         │                                        │  │ -d 172.29.211.9 type 8     │ 
+         │                                        │  │ + hashlimit (10 burst,     │ 
+         │                                        │  │   1/phút theo srcip)       │ 
+         │                                        │  │ → ACCEPT (nếu còn token)   │ 
+         │                                        │  └────────────────────────────┘ 
+         │                                        │ 
+         │                              kernel sinh Echo Reply 
+         │                                        │ 
+         │   ② Echo Reply (type 0)                │  ┌─ OUTPUT chain ────────────┐ 
+         │ ◀──────────────────────────────────────│  │ -d 172.29.211.1 type 0     │ 
+         │                                        │  │ → ACCEPT (không giới hạn)  │ 
+         │                                        │  └────────────────────────────┘ 
+
+--hashlimit-upto 1/min        Cho phép tối đa 1 gói/phút (tốc độ trung bình dài hạn) 
+--hashlimit-burst 10        Cho phép bùng nổ tối đa 10 gói liên tiếp lúc đầu 
+--hashlimit-mode srcip        Đếm/giới hạn theo từng IP nguồn riêng biệt 
+--hashlimit-name t_icmp        Tên bảng hash lưu trạng thái: t_icmp (xem ở /proc/net/ipt_hashlimit/t_icmp) 
+--hashlimit-htable-expire 120000  Mỗi entry trong bảng hash hết hạn sau 120000 ms = 120 giây (2 phút) không hoạt động 
+
+hashlimit dùng mô hình gáo token (token bucket) cho mỗi IP nguồn: 
+1. Mỗi IP có một "gáo" chứa tối đa 10 token (burst).
+2. Ban đầu gáo đầy → IP đó có thể ping 10 phát liên tiếp ngay lập tức (mỗi gói tiêu 1 token). 
+3. Token được nạp lại với tốc độ 1 token/phút (1/min). 
+4. Còn token → gói khớp rule → ACCEPT. Hết token → gói KHÔNG khớp rule này → rơi xuống rule tiếp theo (thường bị DROP). 
+
+             ┌────────────────────────┐ 
+             │      BỂ CHỨA TOKEN     │ 
+             │   Sức chứa: 10 token   │ 
+             │  ┌─────────────────┐   │ 
+  Nạp thêm   │  │ ●●●●●●●●●●      │   │    Tiêu thụ 
+(2 token/s)  │  │ (hiện tại: 10)  │   │  (1 token/request) 
+      →      │  └─────────────────┘   │      → 
+             └────────────────────────┘ 
+
+Thời điểm 0: Bể đầy (10 token) 
+Thời điểm 0: 5 request đến → tiêu 5 token → còn 5 
+Thời điểm 1: Nạp 2 token → 7 token 
+Thời điểm 1: 10 request đến → tiêu 7, 3 request BỊ TỪ CHỐI 
+Thời điểm 2: Nạp 2 token → 2 token sẵn sàng 
+
+-> --hashlimit-burst 10: có tối đa burst 10 token, cho phép 10 lần ping liên tục 1 lúc, mỗi lần ping hết 1 token 
+hết 10 token rồi thì ko ping được nữa, đợi --hashlimit-upto 1/min nạp 1 token 1 phút, có bn token thì burst được bằng đấy lần ping 
+nghĩa là nếu 10p ko ping thì lại burst được 10 phát ping liên tục 
+nhưng có rule --hashlimit-htable-expire 120000 làm cho nếu 2p mà ko ping thì burst nó reset thì lại có 10 lần ping 
+
+code c++ 
+#include <chrono> 
+#include <mutex> 
+#include <algorithm> 
+
+class TokenBucket { 
+   double capacity_; 
+   double refillRate_; 
+   double tokens_; 
+   std::chrono::steady_clock::time_point lastRefill_; 
+   std::mutex mtx_; 
+
+public: 
+   TokenBucket(double capacity, double refillRate) 
+       : capacity_(capacity), refillRate_(refillRate), 
+         tokens_(capacity), 
+         lastRefill_(std::chrono::steady_clock::now()) {} 
+
+   bool allow(double tokensNeeded = 1.0) { 
+       std::lock_guard<std::mutex> lock(mtx_); 
+       refill(); 
+       if (tokens_ >= tokensNeeded) { 
+           tokens_ -= tokensNeeded; 
+           return true; 
+       } 
+       return false; 
+   } 
+
+private: 
+   void refill() { 
+       auto now = std::chrono::steady_clock::now(); 
+       double elapsed = std::chrono::duration<double>( 
+           now - lastRefill_).count(); 
+       tokens_ = std::min(capacity_, tokens_ + elapsed * refillRate_); // Lazy Refill 
+       lastRefill_ = now; 
+   } 
+};
+
+
+***                         ***
+*** sự khác nhau TCP và UDP ***
+***                         ***
+
+TCP 
+send() ghi vào  ─────►  [ SEND BUFFER ]  ─────►  TCP truyền đi 
+                             ▲                         │ 
+                             │                         ▼ 
+                   byte được XÓA KHỎI buffer      bên kia nhận 
+                             ▲                         │ 
+                             │                         ▼ 
+                        nhận được ACK   ◄─────────  gửi ACK về 
+
+UDP     
+sendto() ghi vào ────►  [ SEND BUFFER ]  ────►  truyền đi NGAY 
+                             │                       │ 
+                       byte bị XÓA NGAY              │ 
+                      (không giữ lại để              │ 
+                       gửi lại, không chờ ai)        ▼ 
+                                                 bên kia nhận 
+                                                     │ 
+                                                     ▼ 
+                                           (nếu nhận được thì nhận, 
+                                            mất thì thôi — IM LẶNG) 
+
+                   ✗ KHÔNG có ACK gửi về 
+                   ✗ KHÔNG có đường phản hồi 
+                   ✗ Bên gửi KHÔNG bao giờ biết kết quả
